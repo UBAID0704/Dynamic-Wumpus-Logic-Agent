@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Wumpus Logic Agent</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+
+<style>
+body {
+    margin: 0;
+    background: #1a1a2e;
+    color: #00ffcc;
+    font-family: 'Press Start 2P', cursive;
+    display: flex;
+}
+
+.controls {
+    width: 260px;
+    padding: 20px;
+    background: #111;
+    border-right: 2px solid #00ffcc;
+}
+
+button, input {
+    width: 100%;
+    margin: 6px 0;
+    padding: 8px;
+    background: black;
+    color: #00ffcc;
+    border: 1px solid #00ffcc;
+}
+
+button:hover {
+    background: #00ffcc;
+    color: black;
+}
+
+.main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.grid {
+    display: grid;
+    margin-top: 20px;
+    border: 3px solid #00ffcc;
+}
+
+.cell {
+    width: 60px;
+    height: 60px;
+    border: 1px solid #222;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* STATES */
+.unknown { background: #888; }     /* Gray */
+.safe { background: #00cc44; }     /* Green */
+.pit { background: red; }          /* Red */
+.wumpus { background: red; }       /* Red */
+.gold { background: gold; color: black; }
+
+.agent {
+    border: 3px solid yellow;
+}
+
+/* DASHBOARD */
+.dashboard {
+    margin-top: 15px;
+    display: flex;
+    gap: 15px;
+    flex-wrap: wrap;
+}
+</style>
+</head>
+
+<body>
+
+<div class="controls">
+    Rows <input id="rows" type="number" value="5" min="3" max="10">
+    Cols <input id="cols" type="number" value="5" min="3" max="10">
+    Density <input id="density" type="number" value="0.2" step="0.1">
+
+    <button onclick="initWorld()">INIT</button>
+    <button onclick="toggleAuto()">AUTO RUN</button>
+
+    <button onclick="moveUp()">⬆️</button>
+    <button onclick="moveLeft()">⬅️</button>
+    <button onclick="moveRight()">➡️</button>
+    <button onclick="moveDown()">⬇️</button>
+
+    <button onclick="reset()">RESET</button>
+</div>
+
+<div class="main">
+    <div id="grid" class="grid"></div>
+
+    <div class="dashboard">
+        <div>Moves: <span id="moves">0</span></div>
+        <div>Position: <span id="pos">(0,0)</span></div>
+        <div>Status: <span id="status">IDLE</span></div>
+        <div>Percepts: <span id="percepts">None</span></div>
+    </div>
+</div>
+
+<script>
+
+let grid = [];
+let rows, cols;
+let agent = { r: 0, c: 0 };
+let moves = 0;
+let gameOver = false;
+let autoInterval = null;
+
+/* INIT */
+function initWorld() {
+    rows = +rowsInput.value;
+    cols = +colsInput.value;
+    let density = +densityInput.value;
+
+    grid = [];
+
+    for (let r=0;r<rows;r++){
+        grid[r]=[];
+        for (let c=0;c<cols;c++){
+            grid[r][c]={ pit:false,wumpus:false,gold:false,visited:false,safe:false };
+        }
+    }
+
+    // random start
+    agent.r = Math.floor(Math.random()*rows);
+    agent.c = Math.floor(Math.random()*cols);
+
+    grid[agent.r][agent.c].safe = true;
+    grid[agent.r][agent.c].visited = true;
+
+    // pits
+    for (let r=0;r<rows;r++){
+        for (let c=0;c<cols;c++){
+            if (Math.random()<density && !(r===agent.r && c===agent.c)){
+                grid[r][c].pit = true;
+            }
+        }
+    }
+
+    placeRandom("wumpus");
+    placeRandom("gold");
+
+    moves = 0;
+    gameOver = false;
+    status.innerText = "RUNNING";
+
+    update();
+}
+
+/* RANDOM */
+function placeRandom(type){
+    while(true){
+        let r=Math.floor(Math.random()*rows);
+        let c=Math.floor(Math.random()*cols);
+
+        if (!grid[r][c].pit && !(r===agent.r && c===agent.c)){
+            grid[r][c][type]=true;
+            break;
+        }
+    }
+}
+
+/* PERCEPTS */
+function getPercepts(r,c){
+    let dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+    let breeze=false, stench=false;
+
+    for (let d of dirs){
+        let nr=r+d[0], nc=c+d[1];
+        if (nr>=0 && nc>=0 && nr<rows && nc<cols){
+            if (grid[nr][nc].pit) breeze=true;
+            if (grid[nr][nc].wumpus) stench=true;
+        }
+    }
+
+    let glitter = grid[r][c].gold;
+
+    return {breeze, stench, glitter};
+}
+
+/* MOVE */
+function move(dr,dc){
+    if (gameOver) return;
+
+    let nr=agent.r+dr;
+    let nc=agent.c+dc;
+
+    if (nr<0 || nc<0 || nr>=rows || nc>=cols) return;
+
+    agent.r=nr;
+    agent.c=nc;
+    moves++;
+
+    let cell = grid[nr][nc];
+    cell.visited=true;
+
+    if (!cell.pit && !cell.wumpus) cell.safe=true;
+
+    if (cell.pit){
+        status.innerText="DEAD (Pit)";
+        gameOver=true;
+        revealAll();
+    }
+    else if (cell.wumpus){
+        status.innerText="DEAD (Wumpus)";
+        gameOver=true;
+        revealAll();
+    }
+    else if (cell.gold){
+        status.innerText="WON 🎉";
+        gameOver=true;
+        revealAll();
+    }
+
+    update();
+}
+
+/* AUTO RUN */
+function toggleAuto(){
+    if (autoInterval){
+        clearInterval(autoInterval);
+        autoInterval=null;
+        return;
+    }
+
+    autoInterval=setInterval(()=>{
+        if (gameOver){
+            clearInterval(autoInterval);
+            return;
+        }
+
+        let dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+        let valid=dirs.filter(d=>{
+            let nr=agent.r+d[0], nc=agent.c+d[1];
+            return nr>=0 && nc>=0 && nr<rows && nc<cols;
+        });
+
+        let rand=valid[Math.floor(Math.random()*valid.length)];
+        move(rand[0], rand[1]);
+
+    },600);
+}
+
+/* CONTROLS */
+function moveUp(){ move(1,0); }
+function moveDown(){ move(-1,0); }
+function moveLeft(){ move(0,-1); }
+function moveRight(){ move(0,1); }
+
+/* KEYBOARD */
+document.addEventListener("keydown", e=>{
+    if (e.key==="ArrowUp") moveUp();
+    if (e.key==="ArrowDown") moveDown();
+    if (e.key==="ArrowLeft") moveLeft();
+    if (e.key==="ArrowRight") moveRight();
+});
+
+/* REVEAL */
+function revealAll(){
+    for (let r=0;r<rows;r++){
+        for (let c=0;c<cols;c++){
+            grid[r][c].visited=true;
+        }
+    }
+}
+
+/* UPDATE */
+function update(){
+    renderGrid();
+    pos.innerText=`(${agent.r},${agent.c})`;
+    movesSpan.innerText=moves;
+
+    let p=getPercepts(agent.r,agent.c);
+
+    let text="";
+    if (p.breeze) text+="💨 Breeze ";
+    if (p.stench) text+="🟣 Stench ";
+    if (p.glitter) text+="✨ Glitter";
+    if (text==="") text="None";
+
+    percepts.innerText=text;
+}
+
+/* RENDER */
+function renderGrid(){
+    gridDiv.innerHTML="";
+    gridDiv.style.gridTemplateColumns=`repeat(${cols},60px)`;
+
+    for (let r=rows-1;r>=0;r--){
+        for (let c=0;c<cols;c++){
+
+            let d=document.createElement("div");
+            d.classList.add("cell");
+
+            let cell=grid[r][c];
+
+            if (!cell.visited) d.classList.add("unknown");
+            else if (cell.pit || cell.wumpus) d.classList.add("pit");
+            else if (cell.gold) d.classList.add("gold");
+            else if (cell.safe) d.classList.add("safe");
+
+            if (agent.r===r && agent.c===c){
+                d.classList.add("agent");
+                d.innerText="🤖";
+            }
+
+            gridDiv.appendChild(d);
+        }
+    }
+}
+
+/* RESET */
+function reset(){ location.reload(); }
+
+/* ELEMENTS */
+const gridDiv=document.getElementById("grid");
+const pos=document.getElementById("pos");
+const movesSpan=document.getElementById("moves");
+const status=document.getElementById("status");
+const percepts=document.getElementById("percepts");
+
+const rowsInput=document.getElementById("rows");
+const colsInput=document.getElementById("cols");
+const densityInput=document.getElementById("density");
+
+</script>
+
+</body>
+</html>
